@@ -1,0 +1,88 @@
+main:
+  # IP information for network adapter
+  FixServer: 127.0.0.1
+  FixPort: 3490
+  screenWidth: 1000
+  screenHeight: 700
+
+charts_dir: charts
+
+sectional_charts:
+    Albuquerque:
+        - 'Albuquerque SEC 101'
+        - 9881
+        - 5990
+        - Seattle   # for debug: Denver
+        - El Paso
+        - Dallas-Ft Worth
+        - Seattle # for debug: - Phoenix
+    Seattle:
+        - 'Seattle SEC 96'
+        - 9669
+        - 6165
+        - null
+        - 'Klamath Falls'
+        - 'Albuquerque'
+        - 'Albuquerque' # for debug:, 'Great Falls', None
+
+menu:
+  menus:
+      MainMenu:
+        - ['Zoom', 'set menu focus', "ZOOM"]
+        - ['Debug', 'logging.getLogger().setLevel(1 if logging.getLogger().getEffectiveLevel() > 1 else logging.INFO)', None]
+  start_menu: MainMenu
+  number_of_buttons: 2
+  buttons_spacing: 100
+  left_margin: 100
+  top_margin: 5
+
+# The keybindings are used to attach keystrokes to actions.  The key can be
+# a string that represents a key Sequence.  See the documentation for more
+# information about key sequences and actions.
+keybindings:
+  - key: F1
+    action: Activate Menu Item
+    args: 1
+  - key: F2
+    action: Activate Menu Item
+    args: 2
+  - key: F3
+    action: Activate Menu Item
+    args: 3
+  - key: F4
+    action: Activate Menu Item
+    args: 4
+  - key: F5
+    action: Activate Menu Item
+    args: 5
+  - key: F6
+    action: Activate Menu Item
+    args: 6
+
+# Data bindings tie actions to values in the database
+# key is the database key and should match the FIX Gateway key
+databindings:
+  - key: BTN1
+    condition: True
+    action: Activate Menu Item
+    args: 1
+  - key: BTN2
+    condition: True
+    action: Activate Menu Item
+    args: 2
+  - key: BTN3
+    condition: True
+    action: Activate Menu Item
+    args: 3
+  - key: BTN4
+    condition: True
+    action: Activate Menu Item
+    args: 4
+  - key: BTN5
+    condition: True
+    action: Activate Menu Item
+    args: 5
+  - key: BTN6
+    condition: True
+    action: Activate Menu Item
+    args: 6

@@ -1,0 +1,271 @@
+#  Copyright (c) 2019 Garrett Herschleb
+#
+#  This program is free software; you can redistribute it and/or modify
+#  it under the terms of the GNU General Public License as published by
+#  the Free Software Foundation; either version 2 of the License, or
+#  (at your option) any later version.
+#
+#  This program is distributed in the hope that it will be useful,
+#  but WITHOUT ANY WARRANTY; without even the implied warranty of
+#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#  GNU General Public License for more details.
+#
+#  You should have received a copy of the GNU General Public License
+#  along with this program; if not, write to the Free Software
+#  Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+
+import math
+import logging
+import time
+import threading
+
+try:
+    from PyQt5.QtGui import *
+    from PyQt5.QtCore import *
+    from PyQt5.QtWidgets import *
+except:
+    from PyQt4.QtGui import *
+    from PyQt4.QtCore import *
+
+import fix
+
+import pyavmap.avchart_proj as proj
+
+log = logging.getLogger(__name__)
+
+class AvMap(QGraphicsView):
+    icon_poly_points = [
+        QPointF (0,0)
+       ,QPointF (5,5)
+       ,QPointF (20,5)
+
+       ,QPointF (30,25)
+       ,QPointF (40,25)
+       ,QPointF (35,5)
+
+       ,QPointF (50,5)
+       ,QPointF (55,10)
+       ,QPointF (65,10)
+       ,QPointF (60,0)
+       ,QPointF (65,-10)
+       ,QPointF (55,-10)
+       ,QPointF (50,-5)
+
+       ,QPointF (35,-5)
+       ,QPointF (40,-25)
+       ,QPointF (30,-25)
+
+       ,QPointF (20,-5)
+       ,QPointF (5,-5)
+    ]
+    icon_center = QPointF(25,0)
+    scene_size_multiplier=4
+    def __init__(self, config, parent=None):
+        super(AvMap, self).__init__(parent)
+        self.config = config
+
+        self.setStyleSheet("border: 0px")
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.setRenderHint(QPainter.Antialiasing)
+        self.setFocusPolicy(Qt.NoFocus)
+        self.fontSize = 30
+
+        self.chart_type = proj.CT_SECTIONAL if 'chart_type' not in self.config else self.config ['chart_type']
+
+        lat = fix.db.get_item("LAT", True)
+        self._lat = lat.value
+        lon = fix.db.get_item("LONG", True)
+        self._lon = lon.value
+        track = fix.db.get_item("TRACK", True)
+        self._track = track.value
+        self.zoom = 1.0
+        self.xoff = 0 if 'xoff' not in self.config else self.config['xoff']
+        self.yoff = 0 if 'yoff' not in self.config else self.config['yoff']
+        self.pxmap_update_period = 1.0 if 'pxmap_update_period' not in self.config \
+                                       else self.config['pxmap_update_period']
+        self.icon_opacity = .8 if 'icon_opacity' not in self.config else self.config['icon_opacity']
+        self.icon_scale = 1.0 if 'icon_scale' not in self.config else self.config['icon_scale']
+        self.chart = None
+        self.map_pixmap = None
+        self.new_map_pixmap = None
+        self.map_pixmap_lon = None
+        self.map_pixmap_lat = None
+        self.pmi = None
+        # Data from pixmap construction
+        # The offset of the upper left corner of the constructed pixmap in over-all chart x-y coordinates,
+        # adjusted for zoom level
+        self.corner_x = None
+        self.corner_y = None
+        # The position of the given lat,lon in the over-all chart x-y coordinates,
+        # adjusted for zoom level
+        self.xzoom = None
+        self.yzoom = None
+        self.chart_image_time = 0
+        lat.valueChanged[float].connect(self.setLat)
+        lon.valueChanged[float].connect(self.setLon)
+        track.valueChanged[float].connect(self.setTrack)
+        self.pxmap_update_pending = False
+        self.pxmap_update = None
+        self.pxmap_lock = threading.RLock()
+
+    def resizeEvent(self, event):
+        log.debug("resizeEvent")
+        #Setup the scene that we use for the background of the AI
+        sceneHeight = self.height() * self.scene_size_multiplier
+        sceneWidth = self.width() * self.scene_size_multiplier
+        self.scene = QGraphicsScene(0, 0, sceneWidth+self.width(), sceneHeight+self.height())
+        self.setScene(self.scene)
+
+    def findChart(self):
+        log.debug("findChart")
+        cd = None if 'charts_dir' not in self.config else self.config['charts_dir']
+        self.chart = proj.find_chart (self.chart_type, self._lon, self._lat, cd)
+        if self.chart is None:
+            log.error ("No chart found for %g,%g", self._lon, self._lat)
+            return
+        self.map_pixmap_lon = self._lon
+        self.map_pixmap_lat = self._lat
+        try:
+            self.map_pixmap,self.corner_x,self.corner_y,self.xzoom,self.yzoom = \
+                        self.chart.construct_pixmap(self._lon, self._lat,
+                        self.scene.width(), self.scene.height(),
+                        self.xoff, self.yoff, self.zoom)
+            self.chart_image_time = time.time()
+            good = True
+        except RuntimeError:
+            good = False
+            log.error ("Chart set failure: %s %g,%g", chart_name, self._lon, self._lat)
+        if good:
+            if self.pmi is None:
+                self.pmi = self.scene.addPixmap (self.map_pixmap)
+                self.pmi.setOffset(self.width()/2,self.height()/2)
+            else:
+                self.pmi.setPixmap (self.map_pixmap)
+            self.redraw()
+
+    def redraw(self):
+        log.debug("redraw")
+        self.resetTransform()
+        self.pxmap_lock.acquire()
+        if self.pxmap_update_pending and (self.new_map_pixmap is not None):
+            self.map_pixmap = self.new_map_pixmap
+            self.pmi.setPixmap (self.map_pixmap)
+            self.new_map_pixmap = None
+            self.pxmap_update_pending = False
+        self.centerOn(self.xzoom-self.corner_x-self.xoff + self.width()/2,
+                      self.yzoom-self.corner_y-self.yoff + self.height()/2,
+                     )
+        self.pxmap_lock.release()
+        #self.rotate()
+
+    def setLat(self, val):
+        if val != self._lat and self.isVisible():
+            self._lat = val
+            if self.chart is None or self.map_pixmap is None:
+                self.findChart()
+            else:
+                self.xzoom,self.yzoom = self.chart.get_zoom_pos (self._lon, self._lat, self.zoom)
+                self.redraw()
+                self.check_pxmap_update()
+
+    def setLon(self, val):
+        if val != self._lon and self.isVisible():
+            self._lon = val
+            if self.chart is None or self.map_pixmap is None:
+                self.findChart()
+            else:
+                self.xzoom,self.yzoom = self.chart.get_zoom_pos (self._lon, self._lat, self.zoom)
+                self.redraw()
+                self.check_pxmap_update()
+
+    def incZoom(self, diff):
+        log.debug("incZoom")
+        if diff != 0 and self.isVisible():
+            newzoom = self.zoom + diff
+            if newzoom <= .2:
+                newzoom = .2
+            if newzoom > 2:
+                newzoom = 2
+            if self.zoom != newzoom:
+                self.zoom = newzoom
+                if self.chart is None or self.map_pixmap is None:
+                    self.findChart()
+                else:
+                    self.map_pixmap_lon = self._lon
+                    self.map_pixmap_lat = self._lat
+                    try:
+                        self.map_pixmap,self.corner_x,self.corner_y,self.xzoom,self.yzoom = \
+                                    self.chart.construct_pixmap(self._lon, self._lat,
+                                    self.scene.width(), self.scene.height(),
+                                    self.xoff, self.yoff, self.zoom)
+                        self.chart_image_time = time.time()
+                        good = True
+                    except RuntimeError:
+                        good = False
+                        log.error ("Chart set failure: %s %g,%g", chart_name, self._lon, self._lat)
+                    if good:
+                        self.pmi.setPixmap (self.map_pixmap)
+                        self.redraw()
+
+    def setTrack(self, val):
+        if val != self._track and self.isVisible():
+            self._track = val
+
+# We use the paintEvent to draw on the viewport the parts that aren't moving.
+    def paintEvent(self, event):
+        log.debug("paint")
+        super(AvMap, self).paintEvent(event)
+        w = self.width()
+        h = self.height()
+        p = QPainter(self.viewport())
+        p.setRenderHint(QPainter.Antialiasing)
+
+        p.setPen(QColor(Qt.black))
+        p.setBrush(QColor(Qt.white))
+        p.setOpacity (0.7)
+        angle = self._track+90
+        angle *= math.pi/180
+        cosa = math.cos(angle)
+        sina = math.sin(angle)
+        ix = self.icon_center.x()*self.icon_scale
+        iy = self.icon_center.y()*self.icon_scale
+        offset_x = self.width()/2 + self.xoff - (ix*cosa - iy*sina)
+        offset_y = self.height()/2 + self.yoff - (iy*cosa + ix*sina)
+        pp = [QPointF ((p.x()*cosa - p.y()*sina)*self.icon_scale + offset_x,
+                       (p.y()*cosa + p.x()*sina)*self.icon_scale + offset_y)
+              for p in self.icon_poly_points]
+        p.drawPolygon(QPolygonF(pp))
+
+    def update_chart_pixmap(self):
+        try:
+            map_pixmap,corner_x,corner_y,xzoom,yzoom = \
+                    self.chart.construct_pixmap(self._lon, self._lat,
+                    self.scene.width(), self.scene.height(),
+                    self.xoff, self.yoff, self.zoom)
+            good = True
+        except RuntimeError:
+            good = False
+            self.pxmap_update_pending = False
+            log.error ("update pixmap set failure: %s %g,%g", self.chart.name, self._lon, self._lat)
+        if good:
+            self.pxmap_lock.acquire()
+            self.new_map_pixmap,self.corner_x,self.corner_y,self.xzoom,self.yzoom = \
+                map_pixmap,corner_x,corner_y,xzoom,yzoom
+            self.pxmap_lock.release()
+            self.chart_image_time = time.time()
+
+    def check_pxmap_update(self):
+        if (self.chart is not None) and (not self.pxmap_update_pending):
+            if time.time() - self.chart_image_time > self.pxmap_update_period:
+                cx,cy,oob = self.chart.compute_ul_corner(self._lon, self._lat,
+                            self.scene.width(), self.scene.height(),
+                            self.xoff, self.yoff, self.zoom)
+                if oob:     # out of bounds
+                    # TODO: evaluate loading new chart
+                    pass
+                self.chart_image_time = time.time()
+                if cx != self.corner_x or cy != self.corner_y:
+                    self.pxmap_update_pending = True
+                    th = threading.Thread (target=self.update_chart_pixmap)
+                    th.start()
