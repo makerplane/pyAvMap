@@ -79,13 +79,22 @@ class AvMap(QGraphicsView):
         self._lon = lon.value
         track = fix.db.get_item("TRACK", True)
         self._track = track.value
-        self.zoom = 1.0
+        self.zoom = 1.0 if 'zoom' not in self.config else self.config['zoom']
         self.xoff = 0 if 'xoff' not in self.config else self.config['xoff']
         self.yoff = 0 if 'yoff' not in self.config else self.config['yoff']
         self.pxmap_update_period = 1.0 if 'pxmap_update_period' not in self.config \
                                        else self.config['pxmap_update_period']
         self.icon_opacity = .8 if 'icon_opacity' not in self.config else self.config['icon_opacity']
         self.icon_scale = 1.0 if 'icon_scale' not in self.config else self.config['icon_scale']
+        self.icon_fill = Qt.white if 'icon_fill' not in self.config \
+                            else self.config['icon_fill']
+        self.icon_outline = Qt.black if 'icon_outline' not in self.config \
+                            else self.config['icon_outline']
+        self.show_track = False if 'show_track' not in self.config else self.config['show_track']
+        self.track_color = Qt.green if 'track_color' not in self.config else self.config['track_color']
+        self.track = list()
+        self.last_track_time = 0
+        self.max_track_len = 1000 if 'track_length' not in self.config else self.config['track_length']
         self.chart = None
         self.map_pixmap = None
         self.new_map_pixmap = None
@@ -112,9 +121,9 @@ class AvMap(QGraphicsView):
     def resizeEvent(self, event):
         log.debug("resizeEvent")
         #Setup the scene that we use for the background of the AI
-        sceneHeight = self.height() * self.scene_size_multiplier
-        sceneWidth = self.width() * self.scene_size_multiplier
-        self.scene = QGraphicsScene(0, 0, sceneWidth+self.width(), sceneHeight+self.height())
+        self.pxmpHeight = self.height() * self.scene_size_multiplier
+        self.pxmpWidth = self.width() * self.scene_size_multiplier
+        self.scene = QGraphicsScene(0, 0, self.pxmpWidth+self.width(), self.pxmpHeight+self.height())
         self.setScene(self.scene)
 
     def findChart(self):
@@ -129,13 +138,13 @@ class AvMap(QGraphicsView):
         try:
             self.map_pixmap,self.corner_x,self.corner_y,self.xzoom,self.yzoom = \
                         self.chart.construct_pixmap(self._lon, self._lat,
-                        self.scene.width(), self.scene.height(),
+                        self.pxmpWidth, self.pxmpHeight,
                         self.xoff, self.yoff, self.zoom)
             self.chart_image_time = time.time()
             good = True
         except RuntimeError:
             good = False
-            log.error ("Chart set failure: %s %g,%g", chart_name, self._lon, self._lat)
+            log.error ("Chart set failure: %s %g,%g", self.chart.name, self._lon, self._lat)
         if good:
             if self.pmi is None:
                 self.pmi = self.scene.addPixmap (self.map_pixmap)
@@ -145,7 +154,6 @@ class AvMap(QGraphicsView):
             self.redraw()
 
     def redraw(self):
-        log.debug("redraw")
         self.resetTransform()
         self.pxmap_lock.acquire()
         if self.pxmap_update_pending and (self.new_map_pixmap is not None):
@@ -153,9 +161,21 @@ class AvMap(QGraphicsView):
             self.pmi.setPixmap (self.map_pixmap)
             self.new_map_pixmap = None
             self.pxmap_update_pending = False
-        self.centerOn(self.xzoom-self.corner_x-self.xoff + self.width()/2,
-                      self.yzoom-self.corner_y-self.yoff + self.height()/2,
-                     )
+        cx = self.xzoom-self.corner_x-self.xoff + self.width()/2
+        cy = self.yzoom-self.corner_y-self.yoff + self.height()/2
+        log.log (2, "redraw center on %g,%g - %g,%g - %d,%d = %g,%g", self.xzoom, self.yzoom,
+                        self.corner_x, self.corner_y,
+                        self.width()/2, self.height()/2,
+                        cx,cy)
+        if cy < self.height()/2:
+            log.error ("Image spill to the top")
+        if self.scene.height()-cy < self.height()/2:
+            log.error ("Image spill to the bottom")
+        if cx < self.width()/2:
+            log.error ("Image spill to the left")
+        if self.scene.width()-cx < self.width()/2:
+            log.error ("Image spill to the right")
+        self.centerOn(cx, cy,)
         self.pxmap_lock.release()
         #self.rotate()
 
@@ -168,6 +188,7 @@ class AvMap(QGraphicsView):
                 self.xzoom,self.yzoom = self.chart.get_zoom_pos (self._lon, self._lat, self.zoom)
                 self.redraw()
                 self.check_pxmap_update()
+                self.record_track()
 
     def setLon(self, val):
         if val != self._lon and self.isVisible():
@@ -178,6 +199,22 @@ class AvMap(QGraphicsView):
                 self.xzoom,self.yzoom = self.chart.get_zoom_pos (self._lon, self._lat, self.zoom)
                 self.redraw()
                 self.check_pxmap_update()
+                self.record_track()
+
+    def record_track(self):
+        add = False
+        now = time.time()
+        if len(self.track) > 0:
+            dist = Distance (((self._lon,self._lat), self.track[-1]))
+            if dist > 10 and now - self.last_track_time > 1:
+                add = True
+        else:
+            add = True
+        if add:
+            self.track.append ((self._lon,self._lat))
+            self.last_track_time = now
+            if len(self.track) > self.max_track_len:
+                del self.track[0]
 
     def incZoom(self, diff):
         log.debug("incZoom")
@@ -197,7 +234,7 @@ class AvMap(QGraphicsView):
                     try:
                         self.map_pixmap,self.corner_x,self.corner_y,self.xzoom,self.yzoom = \
                                     self.chart.construct_pixmap(self._lon, self._lat,
-                                    self.scene.width(), self.scene.height(),
+                                    self.pxmpWidth, self.pxmpHeight,
                                     self.xoff, self.yoff, self.zoom)
                         self.chart_image_time = time.time()
                         good = True
@@ -214,16 +251,15 @@ class AvMap(QGraphicsView):
 
 # We use the paintEvent to draw on the viewport the parts that aren't moving.
     def paintEvent(self, event):
-        log.debug("paint")
         super(AvMap, self).paintEvent(event)
         w = self.width()
         h = self.height()
         p = QPainter(self.viewport())
         p.setRenderHint(QPainter.Antialiasing)
 
-        p.setPen(QColor(Qt.black))
-        p.setBrush(QColor(Qt.white))
-        p.setOpacity (0.7)
+        p.setPen(QColor(self.icon_outline))
+        p.setBrush(QColor(self.icon_fill))
+        p.setOpacity (self.icon_opacity)
         angle = self._track+90
         angle *= math.pi/180
         cosa = math.cos(angle)
@@ -237,11 +273,36 @@ class AvMap(QGraphicsView):
               for p in self.icon_poly_points]
         p.drawPolygon(QPolygonF(pp))
 
+        if self.show_track and len(self.track) >= 2:
+            p.setPen(QColor(self.track_color))
+            p.setOpacity(1.0)
+            cx = self.xzoom-self.corner_x-self.xoff     # Where in the pixmap is the center of the display
+            cy = self.yzoom-self.corner_y-self.yoff
+            cx -= self.width()/2                        # Where in the pixmap is the ul corner of display
+            cy -= self.height()/2
+            last_coord_x,last_coord_y = self.screen_coord (self.track[0][0], self.track[0][1], cx, cy)
+            for i in range(1,len(self.track)):
+                icoord_x,icoord_y = self.screen_coord (self.track[i][0], self.track[i][1], cx,cy)
+                p.drawLine(QPointF(last_coord_x,last_coord_y), QPointF(icoord_x,icoord_y))
+                log.debug("track %.1f,%.1f -> %.1f,%.1f", last_coord_x, last_coord_y, icoord_x, icoord_y)
+                last_coord_x = icoord_x
+                last_coord_y = icoord_y
+
+    def screen_coord(self, lon, lat, cx, cy):
+            coord_x,coord_y = self.chart.proj (lon,lat)
+            coord_x *= self.zoom
+            coord_y *= self.zoom
+            coord_x -= self.corner_x                    # Where is the track in the pixmap
+            coord_y -= self.corner_y
+            coord_x -= cx
+            coord_y -= cy
+            return coord_x,coord_y
+
     def update_chart_pixmap(self):
         try:
             map_pixmap,corner_x,corner_y,xzoom,yzoom = \
                     self.chart.construct_pixmap(self._lon, self._lat,
-                    self.scene.width(), self.scene.height(),
+                    self.pxmpWidth, self.pxmpHeight,
                     self.xoff, self.yoff, self.zoom)
             good = True
         except RuntimeError:
@@ -259,7 +320,7 @@ class AvMap(QGraphicsView):
         if (self.chart is not None) and (not self.pxmap_update_pending):
             if time.time() - self.chart_image_time > self.pxmap_update_period:
                 cx,cy,oob = self.chart.compute_ul_corner(self._lon, self._lat,
-                            self.scene.width(), self.scene.height(),
+                            self.pxmpWidth, self.pxmpHeight,
                             self.xoff, self.yoff, self.zoom)
                 if oob:     # out of bounds
                     # TODO: evaluate loading new chart
@@ -269,3 +330,30 @@ class AvMap(QGraphicsView):
                     self.pxmap_update_pending = True
                     th = threading.Thread (target=self.update_chart_pixmap)
                     th.start()
+
+def get_polar_deltas(course):
+    lng1,lat1 = course[0]
+    lng2,lat2 = course[1]
+    dlng = lng2 - lng1
+    dlat = lat2 - lat1
+    return (dlng,dlat)
+
+def GetRelLng(lat1):
+    return math.cos(lat1)
+
+METERS_PER_NM = 1852
+# Computes distance in meters between 2 long/lat points
+def Distance(course, rel_lng=0):
+    dlng,dlat = get_polar_deltas(course)
+
+    # Determine how far is a longitude increment relative to latitude at this latitude
+    if rel_lng == 0:
+        lat1 = course[0][1] * math.pi / 180.0
+        relative_lng_length = GetRelLng(lat1)
+    else:
+        relative_lng_length = rel_lng
+    dlng *= relative_lng_length
+
+    # Multiply by 60 to convert from degrees to nautical miles.
+    distance = math.sqrt(dlng * dlng + dlat * dlat) * 60.0
+    return distance * METERS_PER_NM

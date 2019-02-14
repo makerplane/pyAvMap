@@ -7,6 +7,13 @@ main:
 
 charts_dir: charts
 
+icon_scale: 0.5
+icon_fill: mediumorchid
+icon_outline: white
+icon_opacity: .9
+zoom: 1.0
+show_track: True
+
 sectional_charts:
     Albuquerque:
         - 'Albuquerque SEC 101'

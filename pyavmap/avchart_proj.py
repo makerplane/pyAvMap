@@ -129,21 +129,21 @@ class AvChart:
         y = self.yoff - y
         return (x,y)
 
-    def get_tile_coord(self, lon, lat, xoff, yoff):
+    def get_tile_coord(self, lon, lat):
         x,y = self.proj(lon,lat)
         x /= self.tile_width
         y /= self.tile_height
-        x = int(round(x))
-        y = int(round(y))
-        x += xoff
-        y += yoff
+        x = int(x)
+        y = int(y)
         return x,y
 
-    def get_tile_pixmap_pos (self, lon, lat, xoff, yoff):
-        x,y = self.get_tile_coord(lon, lat, xoff, yoff)
+    def get_tile_pixmap_pos (self, lon, lat):
+        x,y = self.get_tile_coord(lon, lat)
         if x < 0:
+            log.debug ("%g,%g is out of longitude bounds: %g,%g", lon, lat, x,y)
             return (x,y,None)
         elif y < 0:
+            log.debug ("%g,%g is out of latitude bounds: %g,%g", lon, lat, x,y)
             return (x,y,None)
         return self.get_tile_pixmap(x,y)
 
@@ -155,11 +155,15 @@ class AvChart:
         return (x,y,QPixmap(fname))
 
     def compute_upper_left_position(self, lon, lat, width, height, zoom_width, zoom_height, xoff, yoff):
-        imcenterx = int(round(width/2)) + xoff
-        imcentery = int(round(height/2)) + yoff
-        cx,cy = self.get_tile_coord(lon, lat, xoff, yoff)
-        begin_xindex = cx - int(round(imcenterx / zoom_width))
-        begin_yindex = cy - int(round(imcentery / zoom_height))
+        imcenterx = width/2 + xoff
+        imcentery = height/2 + yoff
+        cx,cy = self.get_tile_coord(lon, lat)
+        begin_xindex = cx - int(imcenterx / zoom_width)
+        begin_yindex = cy - int(imcentery / zoom_height)
+        log.debug ("begin_xindex = %d-int(round(%g/%g))(%d) = %d",
+                cx, imcenterx, zoom_width, int(imcenterx / zoom_width), begin_xindex)
+        log.debug ("begin_yindex = %d-int(round(%g/%g))(%d) = %d",
+                cy, imcentery, zoom_height, int(imcentery / zoom_height), begin_yindex)
         out_of_bounds = False
         if begin_xindex < 0:
             begin_xindex = 0
@@ -172,13 +176,13 @@ class AvChart:
     def construct_pixmap(self, lon, lat, width, height, xoff, yoff, zoom):
         ret = QPixmap(width, height)
         ret.fill (QColor(Qt.black))
-        cx,cy,ci = self.get_tile_pixmap_pos (lon, lat, 0,0)
+        cx,cy,ci = self.get_tile_pixmap_pos (lon, lat)
         if ci is None:
             raise RuntimeError ("longitude %g, latitude %g is not contained in map %s (tile %d,%d)"%(
                                     lon,lat,self.name,cx,cy))
 
-        zoom_width = int(round(self.tile_width * zoom))
-        zoom_height = int(round(self.tile_height * zoom))
+        zoom_width = self.tile_width * zoom
+        zoom_height = self.tile_height * zoom
         begin_xindex,begin_yindex,oob = self.compute_upper_left_position (lon, lat,
                         width, height, zoom_width, zoom_height, xoff, yoff)
         end_xindex = begin_xindex + int(width / zoom_width)+1
@@ -186,6 +190,7 @@ class AvChart:
 
         painter = QPainter(ret)
         tile_place_x = 0
+        log.debug ("const_pmp: zoom w,h = %g,%g", zoom_width, zoom_height)
         for i in range(begin_xindex,end_xindex):
             if tile_place_x > width:
                 break
@@ -197,7 +202,9 @@ class AvChart:
                 if tp is not None:
                     tp = tp.scaled (int(round(tp.width()*zoom)), int(round(tp.height()*zoom)),
                                     transformMode=Qt.SmoothTransformation)
-                    painter.drawPixmap(QPoint(tile_place_x,tile_place_y), tp)
+                    painter.drawPixmap(QPoint(int(round(tile_place_x)),int(round(tile_place_y))), tp)
+                    log.debug ("const_pmp: tile %d,%d drawn at %d,%d", i,j,
+                                int(round(tile_place_x)),int(round(tile_place_y)))
                 tile_place_y += zoom_height
             tile_place_x += zoom_width
 
@@ -207,8 +214,8 @@ class AvChart:
         return ret,corner_x,corner_y,xzoom,yzoom
 
     def compute_ul_corner(self, lon, lat, width, height, xoff, yoff, zoom):
-        zoom_width = int(round(self.tile_width * zoom))
-        zoom_height = int(round(self.tile_height * zoom))
+        zoom_width = self.tile_width * zoom
+        zoom_height = self.tile_height * zoom
         begin_xindex,begin_yindex,oob = self.compute_upper_left_position (lon, lat,
                         width, height, zoom_width, zoom_height, xoff, yoff)
         corner_x = begin_xindex * zoom_width
@@ -217,8 +224,8 @@ class AvChart:
 
     def get_zoom_pos(self, lon, lat, zoom):
         chart_x,chart_y = self.proj(lon,lat)
-        xzoom = int(round(chart_x * zoom))
-        yzoom = int(round(chart_y * zoom))
+        xzoom = chart_x * zoom
+        yzoom = chart_y * zoom
         return xzoom,yzoom
 
 
