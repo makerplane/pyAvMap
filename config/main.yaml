@@ -13,24 +13,32 @@ icon_outline: white
 icon_opacity: .9
 zoom: 1.0
 show_track: True
+chart_type: IFR
 
 sectional_charts:
     Albuquerque:
         - 'Albuquerque SEC 101'
-        - 9881
-        - 5990
-        - Seattle   # for debug: Denver
-        - El Paso
-        - Dallas-Ft Worth
-        - Seattle # for debug: - Phoenix
     Seattle:
         - 'Seattle SEC 96'
-        - 9669
-        - 6165
-        - null
-        - 'Klamath Falls'
-        - 'Albuquerque'
-        - 'Albuquerque' # for debug:, 'Great Falls', None
+    Klamath Falls:
+        - 'Klamath Falls SEC 99'
+
+ifr_charts:
+    L01:
+        - ENR_L01
+        - True
+    L02:
+        - ENR_L02
+        - True
+    L24:
+        - ENR_L24
+        - True
+    L30:
+        - ENR_L30
+    L33:
+        - ENR_L33
+    L36:
+        - ENR_L36
 
 menu:
   menus:

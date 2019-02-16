@@ -81,6 +81,9 @@ if __name__ == "__main__":
     if 'sectional_charts' in config:
         proj.configure_charts (proj.CT_SECTIONAL, config['sectional_charts'])
 
+    if 'ifr_charts' in config:
+        proj.configure_charts (proj.CT_IFR, config['ifr_charts'])
+
     main_window = Main()
     screenWidth = int(config["main"]["screenWidth"])
     screenHeight = int(config["main"]["screenHeight"])

@@ -37,24 +37,25 @@ CT_TAC = 'Terminal'
 charts = dict()
 
 class AvChart:
-    def __init__(self, name, base_name, xoff, yoff):
+    def __init__(self, name, base_name, rotated):
         self.name = name
         self.base_name = base_name
-        self.xoff=xoff
-        self.yoff=yoff
-        lat_0=None
-        lon_0=None
+        self.rotated = rotated
+        self.lat_0=None
+        self.lon_0=None
         lat1=None
         lat2=None
         proj='lcc'
         datum='WGS84'
-        self.xscale=0
-        self.yscale=0
         self.llon = None
         self.rlon = None
         self.ulat = None
         self.llat = None
-        with open(base_name + '.htm', 'r') as htm:
+        self.column_count = None
+        htm_name = base_name + '.htm'
+        if not os.path.exists (htm_name):
+            htm_name = base_name + '_tif.htm'
+        with open(htm_name, 'r') as htm:
             while True:
                 line = htm.readline()
                 if line is None or len(line) == 0:
@@ -78,22 +79,17 @@ class AvChart:
                     i = line.index('Central_Meridian')
                     n = line.index('>', i) + 1
                     e = line.index('<', n)
-                    lon_0 = float(line[n:e])
+                    self.lon_0 = float(line[n:e])
                 if 'Latitude_of_Projection_Origin' in line:
                     i = line.index('Projection_Origin')
                     n = line.index('>', i) + 1
                     e = line.index('<', n)
-                    lat_0 = float(line[n:e])
-                if 'Abscissa_Resolution' in line:
-                    i = line.index('Resolution')
+                    self.lat_0 = float(line[n:e])
+                if 'Column_Count' in line:
+                    i = line.index('Column_Count')
                     n = line.index('>', i) + 1
                     e = line.index('<', n)
-                    self.yscale = float(line[n:e])
-                if 'Ordinate_Resolution' in line:
-                    i = line.index('Resolution')
-                    n = line.index('>', i) + 1
-                    e = line.index('<', n)
-                    self.xscale = float(line[n:e])
+                    self.column_count = int(line[n:e])
                 if '_Bounding_Coordinate' in line:
                     i = line.index('Coordinate')
                     n = line.index('>', i) + 1
@@ -114,19 +110,38 @@ class AvChart:
                     else:
                         raise RuntimeError ("%s: Unknown bounding coordinate type: %s"%(base_name, line))
 
-        self.p = Proj(proj=proj, lat_0=lat_0, lon_0=lon_0, units='meters',
+        wfname = base_name + '.tfw'
+        if not os.path.exists (wfname):
+            wfname = base_name + '.tfwx'
+        with open(wfname, 'r') as wf:
+            constants = wf.readlines()
+            wf.close()
+            self.A,self.D, self.B,self.E, self.C,self.F = [float(c) for c in constants]
+
+        self.divisor = (self.E*self.A) - (self.B*self.D)
+        self.xconst = self.B*self.F - self.C*self.E
+        self.yconst = self.D*self.C - self.A*self.F
+        self.center_lat = (self.ulat + self.llat) / 2.0
+        self.center_lon = (self.llon + self.rlon) / 2.0
+        self.p = Proj(proj=proj, lat_0=self.lat_0, lon_0=self.lon_0, units='meters',
                       datum=datum, lat_1=lat1, lat_2=lat2)
 
         pxmp0 = QPixmap(base_name + '00.png')
         self.tile_width = pxmp0.width()
         self.tile_height = pxmp0.height()
 
+    def is_valid(self):
+        return not (self.llon is None or self.rlon is None or
+                    self.ulat is None or self.llat is None)
+
     def proj(self, lon,lat):
-        x,y = self.p(lon,lat)
-        x /= self.xscale
-        y /= self.yscale
-        x += self.xoff
-        y = self.yoff - y
+        x1,y1 = self.p(lon,lat)
+        x = (self.E*x1 - self.B*y1 + self.xconst) / self.divisor
+        y = ((self.A*y1 - self.D*x1 + self.yconst) / self.divisor)
+        if self.rotated:
+            temp = x
+            x = y
+            y = self.column_count - temp - 1
         return (x,y)
 
     def get_tile_coord(self, lon, lat):
@@ -154,7 +169,7 @@ class AvChart:
             return (x,y,None)
         return (x,y,QPixmap(fname))
 
-    def compute_upper_left_position(self, lon, lat, width, height, zoom_width, zoom_height, xoff, yoff):
+    def compute_tile_bounds(self, lon, lat, width, height, zoom_width, zoom_height, xoff, yoff):
         imcenterx = width/2 + xoff
         imcentery = height/2 + yoff
         cx,cy = self.get_tile_coord(lon, lat)
@@ -171,7 +186,13 @@ class AvChart:
         if begin_yindex < 0:
             begin_yindex = 0
             out_of_bounds = True
-        return begin_xindex,begin_yindex, out_of_bounds
+        end_xindex = begin_xindex + int(width / zoom_width)+1
+        end_yindex = begin_yindex + int(height / zoom_height)+1
+        log.debug ("end_*index = %d,%d", end_xindex,end_yindex)
+        fname = self.base_name + str(end_xindex) + str(end_yindex) + '.png'
+        if not os.path.exists (fname):
+            out_of_bounds = True
+        return begin_xindex,begin_yindex, end_xindex,end_yindex, out_of_bounds
 
     def construct_pixmap(self, lon, lat, width, height, xoff, yoff, zoom):
         ret = QPixmap(width, height)
@@ -183,10 +204,8 @@ class AvChart:
 
         zoom_width = self.tile_width * zoom
         zoom_height = self.tile_height * zoom
-        begin_xindex,begin_yindex,oob = self.compute_upper_left_position (lon, lat,
+        begin_xindex,begin_yindex,end_xindex,end_yindex,oob = self.compute_tile_bounds (lon, lat,
                         width, height, zoom_width, zoom_height, xoff, yoff)
-        end_xindex = begin_xindex + int(width / zoom_width)+1
-        end_yindex = begin_yindex + int(height / zoom_height)+1
 
         painter = QPainter(ret)
         tile_place_x = 0
@@ -216,7 +235,7 @@ class AvChart:
     def compute_ul_corner(self, lon, lat, width, height, xoff, yoff, zoom):
         zoom_width = self.tile_width * zoom
         zoom_height = self.tile_height * zoom
-        begin_xindex,begin_yindex,oob = self.compute_upper_left_position (lon, lat,
+        begin_xindex,begin_yindex,end_xindex,end_yindex,oob = self.compute_tile_bounds (lon, lat,
                         width, height, zoom_width, zoom_height, xoff, yoff)
         corner_x = begin_xindex * zoom_width
         corner_y = begin_yindex * zoom_height
@@ -231,12 +250,15 @@ class AvChart:
 
 def load_chart(name, chtype, directory=None):
     if name in charts[chtype]:
-        base_name, xoff, yoff = charts[chtype][name][:3]
+        rotated = False
+        base_name = charts[chtype][name][0]
+        if len(charts[chtype][name]) > 1 and bool(charts[chtype][name][1]):
+            rotated = True
         if directory is not None:
             base_name = os.path.join (directory, chtype, name, base_name)
         else:
             base_name = os.path.join (chtype, name, base_name)
-        ret = AvChart (name, base_name, xoff, yoff)
+        ret = AvChart (name, base_name, rotated)
         return ret
     else:
         log.error ("chart %s not found", name)
@@ -246,31 +268,32 @@ def find_chart (chart_type, lon, lat, directory):
     ch = list(charts[chart_type].keys())[0]
     tried = set()
     while True:
-        in_bounds = True
+        in_bounds = False
         chart = load_chart(ch, chart_type, directory)
-        if chart is not None:
+        if chart is not None and chart.is_valid():
+            in_bounds = True
             tried.add (ch)
             if lon < chart.llon:
                 in_bounds = False
-                newch = charts[chart_type][ch][6]
+                newch = charts[chart_type][ch][4]
                 if newch is not None and (newch not in tried):
                     ch = newch
                     continue
             if lon > chart.rlon:
                 in_bounds = False
-                newch = charts[chart_type][ch][5]
+                newch = charts[chart_type][ch][3]
                 if newch is not None and (newch not in tried):
                     ch = newch
                     continue
             if lat > chart.ulat:
                 in_bounds = False
-                newch = charts[chart_type][ch][3]
+                newch = charts[chart_type][ch][1]
                 if newch is not None and (newch not in tried):
                     ch = newch
                     continue
             if lat < chart.llat:
                 in_bounds = False
-                newch = charts[chart_type][ch][4]
+                newch = charts[chart_type][ch][2]
                 if newch is not None and (newch not in tried):
                     ch = newch
                     continue
@@ -279,6 +302,24 @@ def find_chart (chart_type, lon, lat, directory):
         else:
             # No chart found
             return None
+
+def find_charts (chart_type, lon, lat, directory):
+    ret = list()
+    for ch,chinfo in charts[chart_type].items():
+        chart = load_chart(ch, chart_type, directory)
+        if chart is not None and chart.is_valid():
+            in_bounds = True
+            if lon < chart.llon:
+                in_bounds = False
+            if lon > chart.rlon:
+                in_bounds = False
+            if lat > chart.ulat:
+                in_bounds = False
+            if lat < chart.llat:
+                in_bounds = False
+            if in_bounds:
+                ret.append(chart)
+    return ret
 
 def configure_charts (chtype, d):
     charts[chtype] = d

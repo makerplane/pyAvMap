@@ -126,10 +126,29 @@ class AvMap(QGraphicsView):
         self.scene = QGraphicsScene(0, 0, self.pxmpWidth+self.width(), self.pxmpHeight+self.height())
         self.setScene(self.scene)
 
-    def findChart(self):
-        log.debug("findChart")
+    def find_best_chart(self):
         cd = None if 'charts_dir' not in self.config else self.config['charts_dir']
-        self.chart = proj.find_chart (self.chart_type, self._lon, self._lat, cd)
+        candidates = proj.find_charts (self.chart_type, self._lon, self._lat, cd)
+        if len(candidates) == 0:
+            return None
+        best_chart = candidates[0]
+        if len(candidates) > 1:
+            best_dir = abs(Heading (((self._lon,self._lat), (candidates[0].center_lat, candidates[0].center_lon))) -
+                            self._track)
+            if best_dir > 180:
+                best_dir -= 180
+            for ch in candidates[1:]:
+                d = abs(Heading (((self._lon,self._lat), (ch.center_lat, ch.center_lon))) - self._track)
+                if d > 180:
+                    d = abs(d-360)
+                if d < best_dir:
+                    best_dir = d
+                    best_chart = ch
+        return best_chart
+
+    def init_chart(self):
+        log.debug("init_chart")
+        self.chart = self.find_best_chart()
         if self.chart is None:
             log.error ("No chart found for %g,%g", self._lon, self._lat)
             return
@@ -183,7 +202,7 @@ class AvMap(QGraphicsView):
         if val != self._lat and self.isVisible():
             self._lat = val
             if self.chart is None or self.map_pixmap is None:
-                self.findChart()
+                self.init_chart()
             else:
                 self.xzoom,self.yzoom = self.chart.get_zoom_pos (self._lon, self._lat, self.zoom)
                 self.redraw()
@@ -194,7 +213,7 @@ class AvMap(QGraphicsView):
         if val != self._lon and self.isVisible():
             self._lon = val
             if self.chart is None or self.map_pixmap is None:
-                self.findChart()
+                self.init_chart()
             else:
                 self.xzoom,self.yzoom = self.chart.get_zoom_pos (self._lon, self._lat, self.zoom)
                 self.redraw()
@@ -227,7 +246,7 @@ class AvMap(QGraphicsView):
             if self.zoom != newzoom:
                 self.zoom = newzoom
                 if self.chart is None or self.map_pixmap is None:
-                    self.findChart()
+                    self.init_chart()
                 else:
                     self.map_pixmap_lon = self._lon
                     self.map_pixmap_lat = self._lat
@@ -298,21 +317,22 @@ class AvMap(QGraphicsView):
             coord_y -= cy
             return coord_x,coord_y
 
-    def update_chart_pixmap(self):
+    def update_chart_pixmap(self, chart):
         try:
             map_pixmap,corner_x,corner_y,xzoom,yzoom = \
-                    self.chart.construct_pixmap(self._lon, self._lat,
+                    chart.construct_pixmap(self._lon, self._lat,
                     self.pxmpWidth, self.pxmpHeight,
                     self.xoff, self.yoff, self.zoom)
             good = True
         except RuntimeError:
             good = False
             self.pxmap_update_pending = False
-            log.error ("update pixmap set failure: %s %g,%g", self.chart.name, self._lon, self._lat)
+            log.error ("update pixmap set failure: %s %g,%g", chart.name, self._lon, self._lat)
         if good:
             self.pxmap_lock.acquire()
             self.new_map_pixmap,self.corner_x,self.corner_y,self.xzoom,self.yzoom = \
                 map_pixmap,corner_x,corner_y,xzoom,yzoom
+            self.chart = chart
             self.pxmap_lock.release()
             self.chart_image_time = time.time()
 
@@ -322,13 +342,18 @@ class AvMap(QGraphicsView):
                 cx,cy,oob = self.chart.compute_ul_corner(self._lon, self._lat,
                             self.pxmpWidth, self.pxmpHeight,
                             self.xoff, self.yoff, self.zoom)
+                chart = self.chart
                 if oob:     # out of bounds
-                    # TODO: evaluate loading new chart
-                    pass
+                    chart = self.find_best_chart()
+                    if chart is None or chart.name == self.chart.name:
+                        log.debug ("Out of bounds, but no better chart available")
+                        chart = self.chart
+                    else:
+                        log.debug ("Out of bounds. change chart to %s"%chart.name)
                 self.chart_image_time = time.time()
-                if cx != self.corner_x or cy != self.corner_y:
+                if cx != self.corner_x or cy != self.corner_y or chart != self.chart:
                     self.pxmap_update_pending = True
-                    th = threading.Thread (target=self.update_chart_pixmap)
+                    th = threading.Thread (target=self.update_chart_pixmap, args=(chart,))
                     th.start()
 
 def get_polar_deltas(course):
@@ -341,9 +366,7 @@ def get_polar_deltas(course):
 def GetRelLng(lat1):
     return math.cos(lat1)
 
-METERS_PER_NM = 1852
-# Computes distance in meters between 2 long/lat points
-def Distance(course, rel_lng=0):
+def adjusted_polar_deltas(course, rel_lng=0):
     dlng,dlat = get_polar_deltas(course)
 
     # Determine how far is a longitude increment relative to latitude at this latitude
@@ -353,7 +376,17 @@ def Distance(course, rel_lng=0):
     else:
         relative_lng_length = rel_lng
     dlng *= relative_lng_length
+    return dlng,dlat
 
+METERS_PER_NM = 1852
+# Computes distance in meters between 2 long/lat points
+def Distance(course, rel_lng=0):
+    dlng,dlat = adjusted_polar_deltas(course, rel_lng)
     # Multiply by 60 to convert from degrees to nautical miles.
     distance = math.sqrt(dlng * dlng + dlat * dlat) * 60.0
     return distance * METERS_PER_NM
+
+def Heading(course, rel_lng=0):
+    dlng,dlat = adjusted_polar_deltas(course, rel_lng)
+    heading = math.atan2(dlng, dlat) * 180 / math.pi
+    return heading
