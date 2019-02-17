@@ -7,10 +7,10 @@ Copyright (c) 2018-2019 MakerPlane
 pyAvMap is an open source moving map package for aviation.
 
 Example screen showing a Sectional type chart:
-![Sectional](https://raw.githubusercontent.com/Maker42/pyAvMap/master/doc/SectionalExample.jpg)
+.. image:: https://raw.githubusercontent.com/Maker42/pyAvMap/master/doc/SectionalExample.jpg
 
 Example screen showing an low enroute IFR type chart:
-![IFR](https://raw.githubusercontent.com/Maker42/pyAvMap/master/doc/IFRExample.jpg)
+.. image:: https://raw.githubusercontent.com/Maker42/pyAvMap/master/doc/IFRExample.jpg
 
 
 Installation
