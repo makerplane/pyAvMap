@@ -16,7 +16,7 @@
 #  along with this program; if not, write to the Free Software
 #  Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
 
-import sys
+import sys, time
 
 import logging
 import logging.config
@@ -31,10 +31,9 @@ except:
     from PyQt4.QtCore import *
     PYQT = 4
 import yaml
-
 import fix
 import pyavmap
-import pyavmap.avchart_proj as proj
+import pyavmap.ui
 import hmi
 from hmi import Menu
 
@@ -78,7 +77,18 @@ if __name__ == "__main__":
 
     fix.initialize(config)
 
-    proj.configure_charts (config['charts_dir'])
+    # Wait for database to initialize. This is a cheap stand-in for a better solution
+    # currently pending pull request merge.
+    while True:
+        try:
+            fix.db.get_item("BTN6")
+            fix.db.get_item("LAT")
+            fix.db.get_item("LONG")
+            break
+        except:
+            time.sleep(.1)
+
+    pyavmap.avchart_proj.configure_charts (config['charts_dir'])
 
     main_window = Main()
     screenWidth = int(config["main"]["screenWidth"])
@@ -92,6 +102,14 @@ if __name__ == "__main__":
         menu = Menu(main_window, config["menu"])
         menu.start()
         menu.register_map(avmap)
+        enc = "ENC1" if "rotary_encoder" not in config else config["rotary_encoder"]
+        enc_sel = "BTN6" if "rotary_select" not in config else config["rotary_select"]
+        ctsel_widget = pyavmap.ui.ChartTypeSel(enc, enc_sel, pyavmap.avchart_proj.chart_types(),
+                        avmap.set_chart_type, main_window)
+        ctsel_widget.resize (100, 65)
+        ctsel_widget.move (30, 32)
+        menu.register_target ("Chart Type", ctsel_widget)
+
 
     main_window.show()
     # Main program loop

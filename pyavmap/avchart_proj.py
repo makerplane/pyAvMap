@@ -367,3 +367,6 @@ def configure_charts (directory):
             if os.path.exists (os.path.join (directory, ct, cn, 'rotated')):
                 charts[ct][cn].append(True)
             log.debug ("chart %s of type %s is defined: %s", cn, ct, str(charts[ct][cn]))
+
+def chart_types():
+    return (list(charts.keys()))

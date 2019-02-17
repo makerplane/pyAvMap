@@ -96,6 +96,7 @@ class Menu(QWidget):
             self.focused_object.focus()
             self.focus_button = self.last_button_clicked
             self.buttons[self.focus_button].setText(self.current_menu[self.focus_button][0] + " Done")
+            self.buttons[self.focus_button].adjustSize()
         else:
             self.focused_object = None
 

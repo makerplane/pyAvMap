@@ -125,6 +125,7 @@ class AvMap(QGraphicsView):
         self.pxmpWidth = self.width() * self.scene_size_multiplier
         self.scene = QGraphicsScene(0, 0, self.pxmpWidth+self.width(), self.pxmpHeight+self.height())
         self.setScene(self.scene)
+        self.init_chart()
 
     def find_best_chart(self):
         cd = None if 'charts_dir' not in self.config else self.config['charts_dir']
@@ -266,6 +267,10 @@ class AvMap(QGraphicsView):
     def setTrack(self, val):
         if val != self._track and self.isVisible():
             self._track = val
+
+    def set_chart_type(self, ct):
+        self.chart_type = ct
+        self.init_chart()
 
 # We use the paintEvent to draw on the viewport the parts that aren't moving.
     def paintEvent(self, event):

@@ -19,10 +19,11 @@ menu:
   menus:
       MainMenu:
         - ['Zoom', 'set menu focus', "ZOOM"]
+        - ['Chart Type', 'set menu focus', "Chart Type"]
         - ['Debug', 'logging.getLogger().setLevel(1 if logging.getLogger().getEffectiveLevel() > 1 else logging.INFO)', None]
   start_menu: MainMenu
-  number_of_buttons: 2
-  buttons_spacing: 100
+  number_of_buttons: 3
+  buttons_spacing: 120
   left_margin: 100
   top_margin: 5
 
