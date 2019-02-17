@@ -128,7 +128,8 @@ class AvMap(QGraphicsView):
 
     def find_best_chart(self):
         cd = None if 'charts_dir' not in self.config else self.config['charts_dir']
-        candidates = proj.find_charts (self.chart_type, self._lon, self._lat, cd)
+        candidates = proj.find_charts (self.chart_type, self._lon, self._lat, cd,
+                    self.pxmpWidth, self.pxmpHeight, self.zoom)
         if len(candidates) == 0:
             return None
         best_chart = candidates[0]
@@ -157,8 +158,7 @@ class AvMap(QGraphicsView):
         try:
             self.map_pixmap,self.corner_x,self.corner_y,self.xzoom,self.yzoom = \
                         self.chart.construct_pixmap(self._lon, self._lat,
-                        self.pxmpWidth, self.pxmpHeight,
-                        self.xoff, self.yoff, self.zoom)
+                        self.pxmpWidth, self.pxmpHeight, self.zoom)
             self.chart_image_time = time.time()
             good = True
         except RuntimeError:
@@ -194,7 +194,7 @@ class AvMap(QGraphicsView):
             log.error ("Image spill to the left")
         if self.scene.width()-cx < self.width()/2:
             log.error ("Image spill to the right")
-        self.centerOn(cx, cy,)
+        self.centerOn(cx, cy)
         self.pxmap_lock.release()
         #self.rotate()
 
@@ -253,8 +253,7 @@ class AvMap(QGraphicsView):
                     try:
                         self.map_pixmap,self.corner_x,self.corner_y,self.xzoom,self.yzoom = \
                                     self.chart.construct_pixmap(self._lon, self._lat,
-                                    self.pxmpWidth, self.pxmpHeight,
-                                    self.xoff, self.yoff, self.zoom)
+                                    self.pxmpWidth, self.pxmpHeight, self.zoom)
                         self.chart_image_time = time.time()
                         good = True
                     except RuntimeError:
@@ -279,8 +278,11 @@ class AvMap(QGraphicsView):
         p.setPen(QColor(self.icon_outline))
         p.setBrush(QColor(self.icon_fill))
         p.setOpacity (self.icon_opacity)
-        angle = self._track+90
-        angle *= math.pi/180
+        angle = self._track * math.pi/180
+        if self.chart is not None:
+            angle += self.chart.north_angle
+        else:
+            angle += math.pi/2
         cosa = math.cos(angle)
         sina = math.sin(angle)
         ix = self.icon_center.x()*self.icon_scale
@@ -321,8 +323,7 @@ class AvMap(QGraphicsView):
         try:
             map_pixmap,corner_x,corner_y,xzoom,yzoom = \
                     chart.construct_pixmap(self._lon, self._lat,
-                    self.pxmpWidth, self.pxmpHeight,
-                    self.xoff, self.yoff, self.zoom)
+                    self.pxmpWidth, self.pxmpHeight, self.zoom)
             good = True
         except RuntimeError:
             good = False
@@ -340,8 +341,7 @@ class AvMap(QGraphicsView):
         if (self.chart is not None) and (not self.pxmap_update_pending):
             if time.time() - self.chart_image_time > self.pxmap_update_period:
                 cx,cy,oob = self.chart.compute_ul_corner(self._lon, self._lat,
-                            self.pxmpWidth, self.pxmpHeight,
-                            self.xoff, self.yoff, self.zoom)
+                            self.pxmpWidth, self.pxmpHeight, self.zoom)
                 chart = self.chart
                 if oob:     # out of bounds
                     chart = self.find_best_chart()

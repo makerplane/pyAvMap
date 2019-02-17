@@ -41,3 +41,6 @@ for x in range(ncuts):
             ci.save(sys.argv[1] + str(x) + str(y) + ".png")
         yoff += cut_height
     xoff += cut_width
+if rotate:
+    f = open ('rotated', 'w')
+    f.close()

@@ -14,7 +14,8 @@
 #  along with this program; if not, write to the Free Software
 #  Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
 
-import os
+import os, math
+from glob import glob
 
 try:
     from PyQt5.QtGui import *
@@ -126,6 +127,12 @@ class AvChart:
         self.p = Proj(proj=proj, lat_0=self.lat_0, lon_0=self.lon_0, units='meters',
                       datum=datum, lat_1=lat1, lat_2=lat2)
 
+        cx,cy = self.proj (self.center_lon, self.center_lat)
+        ux,uy = self.proj (self.center_lon, self.ulat)
+        dx = ux-cx
+        dy = uy-cy
+        self.north_angle = math.atan2(dy, dx) + math.pi # 180 degree flip because positive y is down
+
         pxmp0 = QPixmap(base_name + '00.png')
         self.tile_width = pxmp0.width()
         self.tile_height = pxmp0.height()
@@ -152,7 +159,7 @@ class AvChart:
         y = int(y)
         return x,y
 
-    def get_tile_pixmap_pos (self, lon, lat):
+    def get_tile_pixmap_pos (self, lon, lat, just_check=False):
         x,y = self.get_tile_coord(lon, lat)
         if x < 0:
             log.debug ("%g,%g is out of longitude bounds: %g,%g", lon, lat, x,y)
@@ -160,18 +167,21 @@ class AvChart:
         elif y < 0:
             log.debug ("%g,%g is out of latitude bounds: %g,%g", lon, lat, x,y)
             return (x,y,None)
-        return self.get_tile_pixmap(x,y)
+        return self.get_tile_pixmap(x,y, just_check)
 
-    def get_tile_pixmap (self, x,y):
+    def get_tile_pixmap (self, x,y, just_check=False):
         fname = self.base_name + str(x) + str(y) + '.png'
         if not os.path.exists (fname):
             log.debug ("No tile %s", fname)
             return (x,y,None)
-        return (x,y,QPixmap(fname))
+        if just_check:
+            return (x,y,True)
+        else:
+            return (x,y,QPixmap(fname))
 
-    def compute_tile_bounds(self, lon, lat, width, height, zoom_width, zoom_height, xoff, yoff):
-        imcenterx = width/2 + xoff
-        imcentery = height/2 + yoff
+    def compute_tile_bounds(self, lon, lat, width, height, zoom_width, zoom_height):
+        imcenterx = width/2
+        imcentery = height/2
         cx,cy = self.get_tile_coord(lon, lat)
         begin_xindex = cx - int(imcenterx / zoom_width)
         begin_yindex = cy - int(imcentery / zoom_height)
@@ -194,7 +204,7 @@ class AvChart:
             out_of_bounds = True
         return begin_xindex,begin_yindex, end_xindex,end_yindex, out_of_bounds
 
-    def construct_pixmap(self, lon, lat, width, height, xoff, yoff, zoom):
+    def construct_pixmap(self, lon, lat, width, height, zoom):
         ret = QPixmap(width, height)
         ret.fill (QColor(Qt.black))
         cx,cy,ci = self.get_tile_pixmap_pos (lon, lat)
@@ -205,7 +215,7 @@ class AvChart:
         zoom_width = self.tile_width * zoom
         zoom_height = self.tile_height * zoom
         begin_xindex,begin_yindex,end_xindex,end_yindex,oob = self.compute_tile_bounds (lon, lat,
-                        width, height, zoom_width, zoom_height, xoff, yoff)
+                        width, height, zoom_width, zoom_height)
 
         painter = QPainter(ret)
         tile_place_x = 0
@@ -232,14 +242,25 @@ class AvChart:
         xzoom,yzoom = self.get_zoom_pos(lon,lat,zoom)
         return ret,corner_x,corner_y,xzoom,yzoom
 
-    def compute_ul_corner(self, lon, lat, width, height, xoff, yoff, zoom):
+    def compute_ul_corner(self, lon, lat, width, height, zoom):
         zoom_width = self.tile_width * zoom
         zoom_height = self.tile_height * zoom
         begin_xindex,begin_yindex,end_xindex,end_yindex,oob = self.compute_tile_bounds (lon, lat,
-                        width, height, zoom_width, zoom_height, xoff, yoff)
+                        width, height, zoom_width, zoom_height)
         corner_x = begin_xindex * zoom_width
         corner_y = begin_yindex * zoom_height
         return corner_x, corner_y, oob
+
+    def check_boundaries (self, lon, lat, width, height, zoom):
+        cx,cy,ci = self.get_tile_pixmap_pos (lon, lat, just_check=True)
+        if ci is None or ci is False:
+            return False, True
+        zoom_width = self.tile_width * zoom
+        zoom_height = self.tile_height * zoom
+        begin_xindex,begin_yindex,end_xindex,end_yindex,boundary_spill = \
+                    self.compute_tile_bounds (lon, lat,
+                        width, height, zoom_width, zoom_height)
+        return True,boundary_spill
 
     def get_zoom_pos(self, lon, lat, zoom):
         chart_x,chart_y = self.proj(lon,lat)
@@ -303,7 +324,7 @@ def find_chart (chart_type, lon, lat, directory):
             # No chart found
             return None
 
-def find_charts (chart_type, lon, lat, directory):
+def find_charts (chart_type, lon, lat, directory, width, height, zoom):
     ret = list()
     for ch,chinfo in charts[chart_type].items():
         chart = load_chart(ch, chart_type, directory)
@@ -318,8 +339,31 @@ def find_charts (chart_type, lon, lat, directory):
             if lat < chart.llat:
                 in_bounds = False
             if in_bounds:
-                ret.append(chart)
+                valid,boundary_spill = chart.check_boundaries(lon, lat,
+                                width, height, zoom)
+                if valid:
+                    ret.append(chart)
     return ret
 
-def configure_charts (chtype, d):
-    charts[chtype] = d
+def configure_charts (directory):
+    chart_types = glob(os.path.join (directory, '*'))
+    chart_types = [os.path.basename(ct) for ct in chart_types]
+    log.debug ("Found chart types: %s", str(chart_types))
+    for ct in chart_types:
+        charts[ct] = dict()
+        chart_names = glob(os.path.join (directory, ct, '*'))
+        chart_names = [os.path.basename(cn) for cn in chart_names]
+        log.debug ("Found chart in %s: %s", ct, str(chart_names))
+        for cn in chart_names:
+            base_name = glob(os.path.join (directory, ct, cn, '*.tfw'))
+            if len(base_name) == 0:
+                base_name = glob(os.path.join (directory, ct, cn, '*.tfwx'))
+            if len(base_name) == 0:
+                log.error ("Invalid chart found: %s", os.path.join (directory, ct, cn))
+                continue
+            base = os.path.basename(base_name[0])
+            base = os.path.splitext(base)[0]
+            charts[ct][cn] = [base]
+            if os.path.exists (os.path.join (directory, ct, cn, 'rotated')):
+                charts[ct][cn].append(True)
+            log.debug ("chart %s of type %s is defined: %s", cn, ct, str(charts[ct][cn]))
