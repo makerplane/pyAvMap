@@ -6,6 +6,13 @@ Copyright (c) 2018-2019 MakerPlane
 
 pyAvMap is an open source moving map package for aviation.
 
+Example screen showing a Sectional type chart:
+![Sectional](https://raw.githubusercontent.com/Maker42/pyAvMap/master/doc/SectionalExample.jpg)
+
+Example screen showing an low enroute IFR type chart:
+![IFR](https://raw.githubusercontent.com/Maker42/pyAvMap/master/doc/IFRExample.jpg)
+
+
 Installation
 ------------
 
@@ -42,9 +49,9 @@ Download chart(s) from FAA website.  https://www.faa.gov/air_traffic/flight_info
   rm pyAvMap/charts/Sectional/<ChartName>/*.tif             # after the tiles are created, you don't need the humongo tiff anymore
 
 The above example is for sectional charts. Other directory names for other chart types are:
-  1. IFR
-  1. Jet
-  1. Terminal
+  #. IFR
+  #. Jet
+  #. Terminal
 
 Some IFR charts are laid out so that North is approximately in the width direction rather
 than the height direction. L-01 and L-02 are examples of this. In this case, add a second
