@@ -33,7 +33,12 @@ if "pyAvTools" not in ''.join(sys.path):
     elif 'TOOLS_PATH' in os.environ:
         sys.path.append (os.environ['TOOLS_PATH'])
 
-import pyavui
+try:
+    import pyavui
+except:
+    print ("You need to have pyAvTools installed, or in an adjacent directory to pyAvMap.")
+    print ("Or set the environment variable 'TOOLS_PATH' to point to the location of pyAvTools.")
+    sys.exit(-1)
 
 class ChartTypeSel(pyavui.AVUI):
     def __init__(self, enc_key, enc_sel_key, chart_types, callback, parent=None, config=None):

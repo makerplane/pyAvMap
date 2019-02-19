@@ -18,6 +18,8 @@ import math
 import logging
 import time
 import threading
+import os
+from glob import glob
 
 try:
     from PyQt5.QtGui import *
@@ -78,7 +80,7 @@ class AvMap(QGraphicsView):
         lon = fix.db.get_item("LONG", True)
         self._lon = lon.value
         track = fix.db.get_item("TRACK", True)
-        self._track = track.value
+        self._track_direction = track.value
         self.zoom = 1.0 if 'zoom' not in self.config else self.config['zoom']
         self.xoff = 0 if 'xoff' not in self.config else self.config['xoff']
         self.yoff = 0 if 'yoff' not in self.config else self.config['yoff']
@@ -90,11 +92,16 @@ class AvMap(QGraphicsView):
                             else self.config['icon_fill']
         self.icon_outline = Qt.black if 'icon_outline' not in self.config \
                             else self.config['icon_outline']
-        self.show_track = False if 'show_track' not in self.config else self.config['show_track']
-        self.track_color = Qt.green if 'track_color' not in self.config else self.config['track_color']
-        self.track = list()
-        self.last_track_time = 0
-        self.max_track_len = 1000 if 'track_length' not in self.config else self.config['track_length']
+        self.show_path = False if 'show_path' not in self.config else self.config['show_path']
+        self.path_color = Qt.green if 'path_color' not in self.config else self.config['path_color']
+        self.path_history = list()
+        self.last_path_time = 0
+        self.max_path_len = 1000 if 'path_length' not in self.config else self.config['path_length']
+        self.north_is_up = True if 'north_is_up' not in self.config else self.config['north_is_up']
+        self.extended_track_length = 100 if 'extended_track_length' not in self.config \
+                                    else self.config['extended_track_length']
+        self.el_color = Qt.yellow if 'el_color' not in self.config else self.config['el_color']
+        self.last_rotation_val = 0.0
         self.chart = None
         self.map_pixmap = None
         self.new_map_pixmap = None
@@ -136,11 +143,11 @@ class AvMap(QGraphicsView):
         best_chart = candidates[0]
         if len(candidates) > 1:
             best_dir = abs(Heading (((self._lon,self._lat), (candidates[0].center_lat, candidates[0].center_lon))) -
-                            self._track)
+                            self._track_direction)
             if best_dir > 180:
                 best_dir -= 180
             for ch in candidates[1:]:
-                d = abs(Heading (((self._lon,self._lat), (ch.center_lat, ch.center_lon))) - self._track)
+                d = abs(Heading (((self._lon,self._lat), (ch.center_lat, ch.center_lon))) - self._track_direction)
                 if d > 180:
                     d = abs(d-360)
                 if d < best_dir:
@@ -181,8 +188,9 @@ class AvMap(QGraphicsView):
             self.pmi.setPixmap (self.map_pixmap)
             self.new_map_pixmap = None
             self.pxmap_update_pending = False
-        cx = self.xzoom-self.corner_x-self.xoff + self.width()/2
-        cy = self.yzoom-self.corner_y-self.yoff + self.height()/2
+        cx = self.xzoom-self.corner_x + self.width()/2
+        cy = self.yzoom-self.corner_y + self.height()/2
+        self.pxmap_lock.release()
         log.log (2, "redraw center on %g,%g - %g,%g - %d,%d = %g,%g", self.xzoom, self.yzoom,
                         self.corner_x, self.corner_y,
                         self.width()/2, self.height()/2,
@@ -195,9 +203,25 @@ class AvMap(QGraphicsView):
             log.error ("Image spill to the left")
         if self.scene.width()-cx < self.width()/2:
             log.error ("Image spill to the right")
+        if (not self.north_is_up) and (self.chart is not None):    # Track is up
+            cna = self.chart.north_angle * 180 / math.pi
+            rotate_angle = -self._track_direction - (cna - 90)
+            if rotate_angle != self.last_rotation_val:
+                increment_angle = rotate_angle - self.last_rotation_val
+                self.rotate(increment_angle)
+                self.last_rotation_angle = rotate_angle
+            if self.yoff != 0 or self.xoff != 0:
+                rotate_angle *= math.pi / 180
+                cosa = math.cos(rotate_angle)
+                sina = math.sin(rotate_angle)
+                yoff = (self.yoff*cosa - self.xoff*sina)
+                xoff = (self.xoff*cosa + self.yoff*sina)
+                cy -= yoff
+                cx -= xoff
+        else:
+            cx -= self.xoff
+            cy -= self.yoff
         self.centerOn(cx, cy)
-        self.pxmap_lock.release()
-        #self.rotate()
 
     def setLat(self, val):
         if val != self._lat and self.isVisible():
@@ -224,17 +248,17 @@ class AvMap(QGraphicsView):
     def record_track(self):
         add = False
         now = time.time()
-        if len(self.track) > 0:
-            dist = Distance (((self._lon,self._lat), self.track[-1]))
-            if dist > 10 and now - self.last_track_time > 1:
+        if len(self.path_history) > 0:
+            dist = Distance (((self._lon,self._lat), self.path_history[-1]))
+            if dist > 10 and now - self.last_path_time > 1:
                 add = True
         else:
             add = True
         if add:
-            self.track.append ((self._lon,self._lat))
-            self.last_track_time = now
-            if len(self.track) > self.max_track_len:
-                del self.track[0]
+            self.path_history.append ((self._lon,self._lat))
+            self.last_path_time = now
+            if len(self.path_history) > self.max_path_len:
+                del self.path_history[0]
 
     def incZoom(self, diff):
         log.debug("incZoom")
@@ -265,12 +289,15 @@ class AvMap(QGraphicsView):
                         self.redraw()
 
     def setTrack(self, val):
-        if val != self._track and self.isVisible():
-            self._track = val
+        if val != self._track_direction and self.isVisible():
+            self._track_direction = val
 
     def set_chart_type(self, ct):
         self.chart_type = ct
         self.init_chart()
+
+    def set_north_up(self, nu):
+        self.north_is_up = nu
 
 # We use the paintEvent to draw on the viewport the parts that aren't moving.
     def paintEvent(self, event):
@@ -283,15 +310,15 @@ class AvMap(QGraphicsView):
         p.setPen(QColor(self.icon_outline))
         p.setBrush(QColor(self.icon_fill))
         p.setOpacity (self.icon_opacity)
-        angle = self._track * math.pi/180
-        if self.chart is not None:
-            angle += self.chart.north_angle
-        else:
-            angle += math.pi/2
-        cosa = math.cos(angle)
-        sina = math.sin(angle)
         ix = self.icon_center.x()*self.icon_scale
         iy = self.icon_center.y()*self.icon_scale
+        if (self.chart is not None) and self.north_is_up:
+            angle = self._track_direction * math.pi/180
+            angle += self.chart.north_angle
+        else:
+            angle = math.pi/2
+        cosa = math.cos(angle)
+        sina = math.sin(angle)
         offset_x = self.width()/2 + self.xoff - (ix*cosa - iy*sina)
         offset_y = self.height()/2 + self.yoff - (iy*cosa + ix*sina)
         pp = [QPointF ((p.x()*cosa - p.y()*sina)*self.icon_scale + offset_x,
@@ -299,20 +326,33 @@ class AvMap(QGraphicsView):
               for p in self.icon_poly_points]
         p.drawPolygon(QPolygonF(pp))
 
-        if self.show_track and len(self.track) >= 2:
-            p.setPen(QColor(self.track_color))
+        if self.north_is_up and self.show_path and len(self.path_history) >= 2:
+            p.setPen(QColor(self.path_color))
             p.setOpacity(1.0)
             cx = self.xzoom-self.corner_x-self.xoff     # Where in the pixmap is the center of the display
             cy = self.yzoom-self.corner_y-self.yoff
             cx -= self.width()/2                        # Where in the pixmap is the ul corner of display
             cy -= self.height()/2
-            last_coord_x,last_coord_y = self.screen_coord (self.track[0][0], self.track[0][1], cx, cy)
-            for i in range(1,len(self.track)):
-                icoord_x,icoord_y = self.screen_coord (self.track[i][0], self.track[i][1], cx,cy)
+            last_coord_x,last_coord_y = self.screen_coord (self.path_history[0][0], self.path_history[0][1], cx, cy)
+            for i in range(1,len(self.path_history)):
+                icoord_x,icoord_y = self.screen_coord (self.path_history[i][0], self.path_history[i][1], cx,cy)
                 p.drawLine(QPointF(last_coord_x,last_coord_y), QPointF(icoord_x,icoord_y))
-                log.debug("track %.1f,%.1f -> %.1f,%.1f", last_coord_x, last_coord_y, icoord_x, icoord_y)
+                log.debug("path_history %.1f,%.1f -> %.1f,%.1f", last_coord_x, last_coord_y, icoord_x, icoord_y)
                 last_coord_x = icoord_x
                 last_coord_y = icoord_y
+        if self.north_is_up and self.extended_track_length > 0:
+            ix = 0
+            iy = -self.extended_track_length
+            ext_dx = (ix*cosa - iy*sina)
+            ext_dy = (iy*cosa + ix*sina)
+            pen = QPen(QColor(self.el_color))
+            pen.setStyle(Qt.DotLine)
+            p.setPen(pen)
+            bx = self.width()/2 + self.xoff
+            by = self.height()/2 + self.yoff
+            ex = bx + ext_dy
+            ey = by - ext_dx
+            p.drawLine (QPointF(bx,by), QPointF(ex,ey))
 
     def screen_coord(self, lon, lat, cx, cy):
             coord_x,coord_y = self.chart.proj (lon,lat)
@@ -395,3 +435,29 @@ def Heading(course, rel_lng=0):
     dlng,dlat = adjusted_polar_deltas(course, rel_lng)
     heading = math.atan2(dlng, dlat) * 180 / math.pi
     return heading
+
+def configure_charts (directory):
+    chart_types = glob(os.path.join (directory, '*'))
+    chart_types = [os.path.basename(ct) for ct in chart_types]
+    log.debug ("Found chart types: %s", str(chart_types))
+    for ct in chart_types:
+        proj.charts[ct] = dict()
+        chart_names = glob(os.path.join (directory, ct, '*'))
+        chart_names = [os.path.basename(cn) for cn in chart_names]
+        log.debug ("Found chart in %s: %s", ct, str(chart_names))
+        for cn in chart_names:
+            base_name = glob(os.path.join (directory, ct, cn, '*.tfw'))
+            if len(base_name) == 0:
+                base_name = glob(os.path.join (directory, ct, cn, '*.tfwx'))
+            if len(base_name) == 0:
+                log.error ("Invalid chart found: %s", os.path.join (directory, ct, cn))
+                continue
+            base = os.path.basename(base_name[0])
+            base = os.path.splitext(base)[0]
+            proj.charts[ct][cn] = [base]
+            if os.path.exists (os.path.join (directory, ct, cn, 'rotated')):
+                proj.charts[ct][cn].append(True)
+            log.debug ("chart %s of type %s is defined: %s", cn, ct, str(proj.charts[ct][cn]))
+
+def chart_types():
+    return (list(proj.charts.keys()))

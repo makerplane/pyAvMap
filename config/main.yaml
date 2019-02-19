@@ -12,8 +12,24 @@ icon_fill: mediumorchid
 icon_outline: white
 icon_opacity: .9
 zoom: 1.0
-show_track: True
-chart_type: IFR
+show_path: True
+chart_type: Sectional
+north_is_up: True
+extended_track_length: 200
+el_color: black
+
+displays:
+    GPS:
+        columns: 2
+        keys:
+            - TRACKM
+            - GS
+        description_overrides:
+            - Mag Track
+            - GS
+        position: [-20, 20]
+        css_styles: "background-color: gray;border-style: solid ;border-width: 2 ;border-color: black; color: darkblue"
+        item_css_styles: "border-style: none"
 
 menu:
   menus:

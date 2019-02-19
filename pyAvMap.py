@@ -16,7 +16,7 @@
 #  along with this program; if not, write to the Free Software
 #  Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
 
-import sys, time
+import sys, os, time
 
 import logging
 import logging.config
@@ -33,9 +33,23 @@ except:
 import yaml
 import fix
 import pyavmap
-import pyavmap.ui
+import gui
 import hmi
 from hmi import Menu
+
+if "pyAvTools" not in ''.join(sys.path):
+    neighbor_tools = os.path.join ('..', 'pyAvTools')
+    if os.path.isdir (neighbor_tools):
+        sys.path.append (neighbor_tools)
+    elif 'TOOLS_PATH' in os.environ:
+        sys.path.append (os.environ['TOOLS_PATH'])
+
+try:
+    import pyavui
+except:
+    print ("You need to have pyAvTools installed, or in an adjacent directory to pyAvMap.")
+    print ("Or set the environment variable 'TOOLS_PATH' to point to the location of pyAvTools.")
+    sys.exit(-1)
 
 class Main(QMainWindow):
     keyPress = pyqtSignal(QEvent)
@@ -88,7 +102,7 @@ if __name__ == "__main__":
         except:
             time.sleep(.1)
 
-    pyavmap.avchart_proj.configure_charts (config['charts_dir'])
+    pyavmap.configure_charts (config['charts_dir'])
 
     main_window = Main()
     screenWidth = int(config["main"]["screenWidth"])
@@ -104,12 +118,33 @@ if __name__ == "__main__":
         menu.register_map(avmap)
         enc = "ENC1" if "rotary_encoder" not in config else config["rotary_encoder"]
         enc_sel = "BTN6" if "rotary_select" not in config else config["rotary_select"]
-        ctsel_widget = pyavmap.ui.ChartTypeSel(enc, enc_sel, pyavmap.avchart_proj.chart_types(),
+        ctsel_widget = gui.ChartTypeSel(enc, enc_sel, pyavmap.chart_types(),
                         avmap.set_chart_type, main_window)
         ctsel_widget.resize (100, 65)
         ctsel_widget.move (30, 32)
         menu.register_target ("Chart Type", ctsel_widget)
 
+
+    if 'displays' in config:
+        for title,contents in config['displays'].items():
+            position = [0,0]
+            kwargs = {'parent': main_window}
+            dbitems = list()
+            for k,v in contents.items():
+                if k == 'keys':
+                    for key in v:
+                        item = fix.db.get_item(key)
+                        dbitems.append(item)
+                elif k == 'position':
+                    position = v
+                else:
+                    kwargs[k] = v
+            d = pyavui.FIXDisplay(title, dbitems, **kwargs)
+            if position[0] < 0:
+                position[0] = screenWidth+position[0]-d.width()
+            if position[1] < 0:
+                position[1] = screenHeight+position[1]-d.height()
+            d.move (*tuple(position))
 
     main_window.show()
     # Main program loop

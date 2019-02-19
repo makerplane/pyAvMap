@@ -15,7 +15,6 @@
 #  Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
 
 import os, math
-from glob import glob
 
 try:
     from PyQt5.QtGui import *
@@ -344,29 +343,3 @@ def find_charts (chart_type, lon, lat, directory, width, height, zoom):
                 if valid:
                     ret.append(chart)
     return ret
-
-def configure_charts (directory):
-    chart_types = glob(os.path.join (directory, '*'))
-    chart_types = [os.path.basename(ct) for ct in chart_types]
-    log.debug ("Found chart types: %s", str(chart_types))
-    for ct in chart_types:
-        charts[ct] = dict()
-        chart_names = glob(os.path.join (directory, ct, '*'))
-        chart_names = [os.path.basename(cn) for cn in chart_names]
-        log.debug ("Found chart in %s: %s", ct, str(chart_names))
-        for cn in chart_names:
-            base_name = glob(os.path.join (directory, ct, cn, '*.tfw'))
-            if len(base_name) == 0:
-                base_name = glob(os.path.join (directory, ct, cn, '*.tfwx'))
-            if len(base_name) == 0:
-                log.error ("Invalid chart found: %s", os.path.join (directory, ct, cn))
-                continue
-            base = os.path.basename(base_name[0])
-            base = os.path.splitext(base)[0]
-            charts[ct][cn] = [base]
-            if os.path.exists (os.path.join (directory, ct, cn, 'rotated')):
-                charts[ct][cn].append(True)
-            log.debug ("chart %s of type %s is defined: %s", cn, ct, str(charts[ct][cn]))
-
-def chart_types():
-    return (list(charts.keys()))
