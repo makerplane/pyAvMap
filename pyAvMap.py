@@ -31,8 +31,6 @@ except:
     from PyQt4.QtCore import *
     PYQT = 4
 import yaml
-import fix
-import pyavmap
 import gui
 import hmi
 from hmi import Menu
@@ -46,10 +44,13 @@ if "pyAvTools" not in ''.join(sys.path):
 
 try:
     import pyavui
+    import fix
 except:
     print ("You need to have pyAvTools installed, or in an adjacent directory to pyAvMap.")
     print ("Or set the environment variable 'TOOLS_PATH' to point to the location of pyAvTools.")
     sys.exit(-1)
+
+import pyavmap
 
 class Main(QMainWindow):
     keyPress = pyqtSignal(QEvent)
