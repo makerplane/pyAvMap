@@ -29,8 +29,6 @@ except:
     from PyQt4.QtGui import *
     from PyQt4.QtCore import *
 
-import fix
-
 import pyavmap.avchart_proj as proj
 
 log = logging.getLogger(__name__)
@@ -72,15 +70,12 @@ class AvMap(QGraphicsView):
         self.setRenderHint(QPainter.Antialiasing)
         self.setFocusPolicy(Qt.NoFocus)
         self.fontSize = 30
+        self._lat = 0
+        self._lon = 0
+        self._track_direction = 0
 
         self.chart_type = proj.CT_SECTIONAL if 'chart_type' not in self.config else self.config ['chart_type']
 
-        lat = fix.db.get_item("LAT", True)
-        self._lat = lat.value
-        lon = fix.db.get_item("LONG", True)
-        self._lon = lon.value
-        track = fix.db.get_item("TRACK", True)
-        self._track_direction = track.value
         self.zoom = 1.0 if 'zoom' not in self.config else self.config['zoom']
         self.xoff = 0 if 'xoff' not in self.config else self.config['xoff']
         self.yoff = 0 if 'yoff' not in self.config else self.config['yoff']
@@ -118,9 +113,6 @@ class AvMap(QGraphicsView):
         self.xzoom = None
         self.yzoom = None
         self.chart_image_time = 0
-        lat.valueChanged[float].connect(self.setLat)
-        lon.valueChanged[float].connect(self.setLon)
-        track.valueChanged[float].connect(self.setTrack)
         self.pxmap_update_pending = False
         self.pxmap_update = None
         self.pxmap_lock = threading.RLock()

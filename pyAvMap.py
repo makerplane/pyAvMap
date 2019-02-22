@@ -92,17 +92,6 @@ if __name__ == "__main__":
 
     fix.initialize(config)
 
-    # Wait for database to initialize. This is a cheap stand-in for a better solution
-    # currently pending pull request merge.
-    while True:
-        try:
-            fix.db.get_item("BTN6")
-            fix.db.get_item("LAT")
-            fix.db.get_item("LONG")
-            break
-        except:
-            time.sleep(.1)
-
     pyavmap.configure_charts (config['charts_dir'])
 
     main_window = Main()
@@ -111,6 +100,7 @@ if __name__ == "__main__":
     main_window.resize(screenWidth, screenHeight)
     avmap = pyavmap.AvMap (config, main_window)
     avmap.resize(screenWidth, screenHeight)
+
     hmi.initialize(config)
     hmi.keys.initialize(main_window, config["keybindings"])
     if 'menu' in config:
@@ -148,6 +138,16 @@ if __name__ == "__main__":
             d.move (*tuple(position))
 
     main_window.show()
+    track = fix.db.get_item("TRACK")
+    avmap.setTrack(track.value)
+    lat = fix.db.get_item("LAT")
+    avmap.setLat(lat.value)
+    lon = fix.db.get_item("LONG")
+    avmap.setLon (lon.value)
+    lat.valueChanged[float].connect(avmap.setLat)
+    lon.valueChanged[float].connect(avmap.setLon)
+    track.valueChanged[float].connect(avmap.setTrack)
+
     # Main program loop
     result = app.exec_()
 
