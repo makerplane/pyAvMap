@@ -44,7 +44,7 @@ if "pyAvTools" not in ''.join(sys.path):
 
 try:
     import pyavui
-    import fix
+    import pyavtools.fix as fix
 except:
     print ("You need to have pyAvTools installed, or in an adjacent directory to pyAvMap.")
     print ("Or set the environment variable 'TOOLS_PATH' to point to the location of pyAvTools.")
